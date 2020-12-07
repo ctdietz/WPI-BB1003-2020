@@ -1,20 +1,6 @@
 from styledstring import Styledstring
 from butils import read_FASTA, dna_to_protein
 
-def make_pre_mrna(dna: str) -> str:
-    complement = {
-        'T': 'A',
-        'C': 'G',
-        'A': 'U',
-        'G': 'C'
-    }
-    pre_mrna = ''
-    for b in dna:
-        pre_mrna += complement[b]
-    return pre_mrna
-
-def cut_pre_mrna(pre_mrna: str, *introns: str) -> list:
-    pass
 
 def splice_dna(dna: str, *introns: str) -> str:
     """ Removes all regions of dna matching a given intron
