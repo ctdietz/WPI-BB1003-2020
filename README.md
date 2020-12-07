@@ -3,26 +3,25 @@
 ## butils.py
 Includes convenience and utility functions for common operations, such as loading FASTA formatted files
 
-## Project Python Virtual Environment
 
 ## Activating the virtual environment:
 If using an IDE such as VSCode, you can change the interpreter to the one in /VENV
 
 
-Commands assume you are in \WPI-BB1003-2020
+Commands assume you are in ```...\WPI-BB1003-2020```
 
-### Windows powershell:
+**Windows powershell:**
 
 ```
-VENV\Scripts\Activate.ps1
-```
-
-### Windows CMD:
-```
-VENV\Scripts\activate.bat
+$ VENV\Scripts\Activate.ps1
 ```
 
-### Unix/Linux:
+**Windows CMD**:
 ```
-source VENV/bin/activate
+$ VENV\Scripts\activate.bat
+```
+
+**Unix/Linux**:
+```
+$ source VENV/bin/activate
 ```
