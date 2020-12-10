@@ -1,18 +1,81 @@
 import os, sys, platform
 from typing import Optional, Union
 from collections import namedtuple
-from operator import add
+import operator as opr
+from functools import lru_cache
+import textwrap
 
 from userinput import InputHandlerWin, InputHandlerNix
 
 
+PLATFORM = platform.system()
+
 class Term:
+
+    size = os.get_terminal_size()
+   
+    # different OS's require different low level terminal interfaces
+    # NOTE: no low level stuff is happening yet. but it could
+    if PLATFORM == 'Windows':
+        def print(text: str) -> None:
+            print(text, sep='', end='', flush=True)
+    elif PLATFORM == 'Linux':
+        def print(text: str) -> None:
+            print(text, sep='', end='', flush=True)
+    elif PLATFORM == 'Darwin':
+        def print(text: str) -> None:
+            print(text, sep='', end='', flush=True)
+    else: 
+        raise NotImplementedError(f"Platform '{self._platform}' is not yet supported")
+
+    def precsi(seq: str) -> str:
+        """ Prepend the ANSI Control Sequence Indicator
+        """
+        escape_sequence = "\u001b[" + seq
+        return escape_sequence
+
+    def printcsi(seq: str) -> None:
+        Term.print(Term.precsi(seq))
+
+    def cursor_abs(n: int, m: int) -> None:
+        '''Absolute Cursor Position Control Sequence
+        Moves the cursor to row n, column m
+        Values are 1 based eg. first column is column 1
+        '''
+        Term.printcsi(f"{n};{m}H")
+
+    def cursor_up(n: int=1) -> None:
+        '''Move cursor up n lines
+        '''
+        Term.printcsi(f"{n}A")
+    
+    def cursor_down(n: int=1) -> None:
+        '''Move cursor down n lines
+        '''
+        Term.printcsi(f"{n}B")
+    
+    def cursor_forward(n: int=1) -> None:
+        '''Move cursor forward (right) n lines
+        '''
+        Term.printcsi(f"{n}C")
+    
+    def cursor_back(n: int=1) -> None:
+        '''Move cursor back (left) n lines
+        '''
+        Term.printcsi(f"{n}D")
+
+    # @property
+    # def size():
+    #     return os.get_terminal_size()
+
+
+class Screen:
     Size = namedtuple("Size", ["columns", "lines"])
     
     def __init__(self, size: Optional[tuple]=None, alt_buff=True, *args, **kwargs):
         """An interface for ANSI terminals. 
-        
-        In accordance with the ANSI standard,
+
+        NOTE: This has been changed. 
         coordinates are of the form n, m (row, column)
         and indexing is 1 based. eg upper left coordinate is (1, 1)
 
@@ -23,87 +86,28 @@ class Term:
         Raises:
             NotImplementedError: If the current platform is not supported.
         """
-        self._platform = platform.system()
-
-        # map the correct system dependent callable to send alias
-        # NOTE: May not be necessary, but better now than later 
-        if self._platform == 'Windows':
-            self.send = self.send_win
-        elif self._platform == 'Linux':   # TODO: add distinct OSX and Linux send methods
-            self.send = self.send_nix
-        elif self._platform == 'Darwin':  # aka MacOS
-            self.send = self.send_nix
-        else: 
-            raise NotImplementedError(f"Platform '{self._platform}' is not yet supported")
 
         self._uses_alt_buff = alt_buff
-        self.size = os.get_terminal_size() if size is None else Term.Size(columns=size[0], lines=size[1])
-
-    def _make_esc(self, code: str) -> str:
-        escape_sequence = "\u001b[" + code
-        return escape_sequence
-
-    def send_win(self, text: str) -> None:
-        print(text, sep='', end='', flush=True)
-
-    def send_nix(self, text: str) -> None:
-        print(text, sep='', end='', flush=True)
+        self.size = Term.size if size is None else Screen.Size(columns=size[0], lines=size[1])
 
     def startup(self):
         """ Sends the esc_seq to swap to the terminal alt buffer"""
         #TODO: this doesn't seem to work properly
         if self._uses_alt_buff:
-            self.send(self._make_esc("?1049h"))
+            Term.printcsi("?1049h")
 
     def shutdown(self):
         """ Sends the esc_seq to swap to the terminal main buffer, and quits"""
         #TODO: this doesn't seem to work properly
         if self._uses_alt_buff:
-            self.send(self._make_esc("?1049l"))
+            Term.printcsi("?1049l")
         quit()
-
-    # def run(self):
-    #     self.startup()
-    #     while True:
-    #         char = sys.stdin.read(1)
-    #         if ord(char) == 3:  # CTRL-C
-    #             break
-    #         else:
-    #             self.handle_input(char)
-    #     self.shutdown()
-
+    
     def handle_input(self, char):
         pass
 
-    def cursor_abs(self, n: int, m: int) -> None:
-        '''Absolute Cursor Position Control Sequence
-        Moves the cursor to row n, column m
-        Values are 1 based eg. first column is column 1
-        '''
-        self.send(self._make_esc(f"{n};{m}H"))
 
-    def cursor_up(self, n: int=1) -> None:
-        '''Move cursor up n lines
-        '''
-        self.send(self._make_esc(f"{n}A"))
-    
-    def cursor_down(self, n: int=1) -> None:
-        '''Move cursor down n lines
-        '''
-        self.send(self._make_esc(f"{n}B"))
-    
-    def cursor_forward(self, n: int=1) -> None:
-        '''Move cursor forward n lines
-        '''
-        self.send(self._make_esc(f"{n}C"))
-    
-    def cursor_back(self, n: int=1) -> None:
-        '''Move cursor back n lines
-        '''
-        self.send(self._make_esc(f"{n}D"))
-
-
-class Canvas(Term):
+class Canvas(Screen):
     Position = namedtuple("Position", ["column", "line"])
     def __init__(self, size: tuple, position: tuple, *args, **kwargs):
         """A drawable area on the screen.
@@ -113,8 +117,8 @@ class Canvas(Term):
         and indexing is 1 based. eg upper left coordinate is (1, 1)
 
         Args:
-            size (tuple): size of canvas (row: int, column: int)
-            position (tuple): relative position of the canvas (row: int, column: int). \
+            size (tuple): size of element (columns, rows). Defaults to None.
+            position (tuple): relative position of the canvas (column int, row: int). \
                               Indexing is 1 based. 
         """
         super().__init__(size=size, *args, **kwargs)
@@ -128,10 +132,11 @@ class Canvas(Term):
         if start is not None:
             if size is None:
                 size = (self.size.columns - start[0], self.size.lines - start[1])
+            
             blankchars = ' '*(size[0])
             for line in range(size[1]):
                 cln = self.content[line]
-                cln = blankchars.join([cln[:start(0)], cln[start(1)+size[1]:]])
+                cln = blankchars.join([cln[:start[0]], cln[start[1]+size[1]:]])
                 self.content[line] = cln
         else:
             self.content = [' '*self.size.columns for _ in range(self.size.lines)]
@@ -146,9 +151,9 @@ class Canvas(Term):
         else:
             raise TypeError("child must be of type Term or instance of subclass of Term")
 
-    def remove_child(self, child, ignoresubchilds=False) -> None:
+    def rm_child(self, child, ignoresubchilds=False) -> None:
         raise NotImplementedError
-        if isinstance(child, Term):
+        if isinstance(child, Screen):
             if child in self.children:
                 pass
         else:
@@ -156,19 +161,25 @@ class Canvas(Term):
     
     def redraw(self, position=None) -> None:
         position = (self.position.column, self.position.line) if position is None else position
-        self.cursor_abs(position[1], position[0])
+        Term.cursor_abs(position[1], position[0])
         for i, line in enumerate(self.content):
-            self.cursor_abs(position[1] + i, position[0])
-            self.send(line)
+            Term.cursor_abs(position[1] + i, position[0])
+            Term.print(line)
         for child in self.children:
-            position = list(map(add, position, child.position))
+            position = list(map(opr.add, position, child.position))
             child.redraw(position)
 
-    def print_at(self, text, position=None, checkbounds=True):
+    def print_at(self, text, position=None, wrap=True):
         #TODO: implement checkbounds to see if it overflows
         position = (self.position.column, self.position.line) if position is None else position
-        self.cursor_abs(position[1], position[0])
-        self.send(text)
+        if wrap:
+            text = textwrap.wrap(text, self.size.columns - position[0] + 2)
+            for i, line in enumerate(text, start=position[1]):
+                Term.cursor_abs(i, position[0])
+                Term.print(line)
+        else:
+            Term.cursor_abs(position[1], position[0])
+            Term.print(text)
 
 
 class CommandPrompt(Canvas):
@@ -187,16 +198,16 @@ class CommandPrompt(Canvas):
         if redraw:
             self.redraw()
         if resetcursor:
-            self.cursor_abs(self.position[1], self.position[0]+2)
+            Term.cursor_abs(self.position[1], self.position[0]+2)
 
     def redraw(self, to_start=True):
         super().redraw()
         if to_start:
-            self.cursor_abs(self.position[1], self.position[0]+2)
+            Term.cursor_abs(self.position[1], self.position[0]+2)
 
 
 
-class AppBase(Term):
+class AppBase(Screen):
     def __init__(self, name, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.name = name
@@ -208,22 +219,31 @@ class AppBase(Term):
         self.draw_border()
         
     def draw_border(self):
-        #TODO: change print calls to send()
-        self.cursor_abs(1, 1)
-        print(self._border_top, end='', flush=True)
+        Term.cursor_abs(1, 1)
+        Term.print(self._border_top)
+
+        Term.cursor_abs(self.size.lines - 2, 1)
+        Term.print(self._border_mid)
+
+        Term.cursor_abs(self.size.lines, 1)
+        Term.print(self._border_bot)
+
+        Term.cursor_abs(self.size.lines - 1, 1)
         for r in range(2, self.size.lines - 2):
-            self.cursor_abs(r, 1)
-            print('│', end='', flush=True)
-            self.cursor_abs(r, self.size.columns)
-            print('│', end='', flush=True)
-        self.cursor_abs(self.size.lines - 2, 1)
-        print(self._border_mid, end='', flush=True)
-        self.cursor_abs(self.size.lines - 1, 1)
-        print('│', end='', flush=True)
-        self.cursor_abs(self.size.lines - 1, self.size.columns)
-        print('│', end='', flush=True)
-        self.cursor_abs(self.size.lines, 1)
-        print(self._border_bot, end='', flush=True)
+            Term.cursor_abs(r, 1)
+            Term.print('│')
+            Term.cursor_abs(r, self.size.columns)
+            Term.print('│')
+
+        Term.cursor_abs(self.size.lines - 1, 1)
+        Term.print('│')
+        Term.cursor_abs(self.size.lines - 1, self.size.columns)
+        Term.print('│')
+
+
+class Layout(Canvas):
+    def __init__(self, size: tuple, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 class App(AppBase):
@@ -235,14 +255,14 @@ class App(AppBase):
 
         # use correct input handler
         # TODO: this should probably go up in Term
-        if self._platform == 'Windows':
+        if PLATFORM == 'Windows':
             self._inputhandler = InputHandlerWin()
-        elif self._platform == 'Linux':   # TODO: add distinct OSX and Linux send methods
+        elif PLATFORM == 'Linux':   # TODO: add distinct OSX and Linux send methods
             self._inputhandler = InputHandlerNix()
-        elif self._platform == 'Darwin':  # aka MacOS
+        elif PLATFORM == 'Darwin':  # aka MacOS
             self._inputhandler = InputHandlerNix()
         else: 
-            raise NotImplementedError(f"Platform '{self._platform}' is not yet supported")
+            raise NotImplementedError(f"Platform '{PLATFORM}' is not yet supported")
 
     def run(self):
         self.startup()
@@ -253,8 +273,8 @@ class App(AppBase):
             if rawinput == 'key_ESCAPE':
                 self.shutdown()
             elif rawinput == 'key_BACKSPACE':
-                self.send(' ')
-                self.cursor_back()
+                Term.print(' ')
+                Term.cursor_back()
             elif rawinput is not None:
                 self.content.clear()
                 self.content.print_at(rawinput)
