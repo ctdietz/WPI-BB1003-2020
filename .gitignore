@@ -1,3 +1,6 @@
 .vscode/settings.json
 __pycache__/butils.cpython-39.pyc
 __pycache__/styledstring.cpython-39.pyc
+personal_test.py
+__pycache__/personal_test.cpython-39.pyc
+__pycache__/userinput.cpython-39.pyc
