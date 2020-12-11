@@ -1,18 +1,53 @@
+from abc import ABC, abstractmethod
 import os, sys, platform
 from typing import Optional, Union
 from collections import namedtuple
 import operator as opr
-from functools import lru_cache
+from functools import reduce
 import textwrap
-
 from userinput import InputHandlerWin, InputHandlerNix
+from styledstring import Styledstring
+
+
+
+class Rect:
+    def __init__(self, origin: tuple, size: tuple):
+        self.origin = origin
+        self.size = size
+
+    @property
+    def topleft(self) -> tuple:
+        return self.origin
+    
+    @property
+    def topright(self) -> tuple:
+        return (self.size[0], self.origin[1])
+
+    @property
+    def bottomleft(self) -> tuple:
+        return (self.origin[0], self.size[1])
+    
+    @property
+    def bottomright(self) -> tuple:
+        return self.size
+
+    @property
+    def width(self) -> int:
+        return self.size[0]
+
+    @property
+    def height(self) -> int:
+        return self.size[1]
+
+    def offset_origin(self, offset: tuple) -> tuple:
+        return (self.origin[0] + offset[0], self.origin[1] + offset[1])
 
 
 PLATFORM = platform.system()
 
 class Term:
-
     size = os.get_terminal_size()
+    rect = Rect((1, 1), (size.columns, size.lines))
    
     # different OS's require different low level terminal interfaces
     # NOTE: no low level stuff is happening yet. but it could
@@ -37,7 +72,7 @@ class Term:
     def printcsi(seq: str) -> None:
         Term.print(Term.precsi(seq))
 
-    def cursor_abs(n: int, m: int) -> None:
+    def cursor_abs(m: int, n: int) -> None:
         '''Absolute Cursor Position Control Sequence
         Moves the cursor to row n, column m
         Values are 1 based eg. first column is column 1
@@ -72,23 +107,20 @@ class Term:
 class Screen:
     Size = namedtuple("Size", ["columns", "lines"])
     
-    def __init__(self, size: Optional[tuple]=None, alt_buff=True, *args, **kwargs):
+    def __init__(self, rect: Optional[Rect]=None, alt_buff=False, *args, **kwargs):
         """An interface for ANSI terminals. 
-
         NOTE: This has been changed. 
         coordinates are of the form n, m (row, column)
         and indexing is 1 based. eg upper left coordinate is (1, 1)
-
         Args:
             size (Optional[tuple], optional): size of element (columns, rows). Defaults to None.
             alt_buff (bool, optional): Request the terminal to switch to the alternate buffer. Defaults to True.
-
         Raises:
             NotImplementedError: If the current platform is not supported.
         """
 
         self._uses_alt_buff = alt_buff
-        self.size = Term.size if size is None else Screen.Size(columns=size[0], lines=size[1])
+        self.rect = Term.rect if rect is None else rect
 
     def startup(self):
         """ Sends the esc_seq to swap to the terminal alt buffer"""
@@ -107,151 +139,146 @@ class Screen:
         pass
 
 
-class Canvas(Screen):
-    Position = namedtuple("Position", ["column", "line"])
-    def __init__(self, size: tuple, position: tuple, *args, **kwargs):
+class CanvasABC(ABC):
+    def __init__(self):
+        super().__init__()
+
+
+class Canvas(CanvasABC):
+    def __init__(self, rect: Rect, *args, **kwargs):
         """A drawable area on the screen.
         
         In accordance with the ANSI standard, 
         coordinates are of the form n, m (row, column)
         and indexing is 1 based. eg upper left coordinate is (1, 1)
-
         Args:
             size (tuple): size of element (columns, rows). Defaults to None.
             position (tuple): relative position of the canvas (column int, row: int). \
                               Indexing is 1 based. 
         """
-        super().__init__(size=size, *args, **kwargs)
+
+        self.rect = rect
         
-        self.position = Canvas.Position(column=position[0], line=position[1])
-        self.children = []
+        self.elements = []
 
-        self.content = [' '*self.size.columns for _ in range(self.size.lines)]
+        self._empty_content = [' '*self.rect.width for _ in range(self.rect.height)]
 
-    def clear(self, start: Optional[tuple]=None, size: Optional[tuple]=None, redraw=True) -> None:
-        if start is not None:
-            if size is None:
-                size = (self.size.columns - start[0], self.size.lines - start[1])
-            
-            blankchars = ' '*(size[0])
-            for line in range(size[1]):
-                cln = self.content[line]
-                cln = blankchars.join([cln[:start[0]], cln[start[1]+size[1]:]])
-                self.content[line] = cln
-        else:
-            self.content = [' '*self.size.columns for _ in range(self.size.lines)]
-        if redraw:
-            self.redraw()
+    def add_element(self, element):
+        element.rect = self.rect
+        self.elements.append(element)
 
-    def add_child(self, child) -> None:
-        if isinstance(child, Term):
-            #TODO: check if child is already in children
-            #       and if child is alrady in children of children
-            self.children.append()
-        else:
-            raise TypeError("child must be of type Term or instance of subclass of Term")
+    def add_elements(self, *elements: list):
+        for elem in elements:
+            self.add_element(elem)
 
-    def rm_child(self, child, ignoresubchilds=False) -> None:
-        raise NotImplementedError
-        if isinstance(child, Screen):
-            if child in self.children:
-                pass
-        else:
-            raise TypeError("child must be of type Term or instance of subclass of Term")
-    
-    def redraw(self, position=None) -> None:
-        position = (self.position.column, self.position.line) if position is None else position
-        Term.cursor_abs(position[1], position[0])
-        for i, line in enumerate(self.content):
-            Term.cursor_abs(position[1] + i, position[0])
+    def clear(self):
+        self._empty_content = [' '*self.rect.width for _ in range(self.rect.height)]
+
+    def refresh(self):
+        Term.cursor_abs(*self.rect.origin)
+        for i, line in enumerate(self._empty_content):
+            Term.cursor_abs(*self.rect.offset_origin((0, i)))
             Term.print(line)
-        for child in self.children:
-            position = list(map(opr.add, position, child.position))
-            child.redraw(position)
+        for elem in self.elements:
+            elem.draw()
 
-    def print_at(self, text, position=None, wrap=True):
+    def print_at(self, text, position=None, wrap=False):
         #TODO: implement checkbounds to see if it overflows
-        position = (self.position.column, self.position.line) if position is None else position
+        position = self.rect.origin if position is None else position
         if wrap:
-            text = textwrap.wrap(text, self.size.columns - position[0] + 2)
-            for i, line in enumerate(text, start=position[1]):
-                Term.cursor_abs(i, position[0])
+            text = textwrap.wrap(text, self.rect.width - position[0] + 2)
+            for i, line in enumerate(text, start=position[1]+1):
+                Term.cursor_abs(position[0], i)
                 Term.print(line)
         else:
-            Term.cursor_abs(position[1], position[0])
+            Term.cursor_abs(position[0], position[1])
             Term.print(text)
+
+    def make_copy(self):
+        newcopy = Canvas(rect=self.rect)
+        return newcopy
+
+
+class ElementABC(Canvas):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+
+    @abstractmethod
+    def draw(self):...
+
+
+
+class Text(ElementABC):
+    def __init__(self, value, alignment='left', vposition: int=1, *args, **kwargs):
+        super().__init__(rect=Term.rect, *args, **kwargs)
+        self.value = list(value)
+        self.alignment = alignment
+        self.vposition = vposition
+
+    def draw(self):
+        if self.alignment == 'left':
+            self.draw_left(self.value, self.vposition)
+        elif self.alignment == 'center':
+            self.draw_centered(self.value, self.vposition)
+
+    def draw_left(self, value, vposition):
+        hstart = 0
+        for val in value:
+            self.print_at(val, (self.rect.origin[0]+hstart, vposition))
+            hstart += val.__len__()
+
+    def draw_centered(self, value, vposition):
+        total_len = reduce(opr.add, map(len, value))
+
+        hstart = self.rect.width//2 - total_len//2
+        for val in value:
+            self.print_at(val, (hstart, vposition))
+            hstart += val.__len__()
+
+    def update_value(self, value):
+        self.value = list(value)
+        self.draw()
+
+
+class MultilineText(Text):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def draw(self):
+        for i in range(len(self.value)):
+            vpos = self.vposition + i
+            if self.alignment == 'left':
+                self.draw_left(self.value[i], vpos)
+            elif self.alignment == 'center':
+                self.draw_centered(self.value[i], vpos)
 
 
 class CommandPrompt(Canvas):
-    def __init__(self, size: tuple, position: tuple, leader: str='>', *args, **kwargs):
+    def __init__(self, rect: Rect, leader: str='>', *args, **kwargs):
         
         # size = (size, 1) if isinstance(size, int) else size
-        super().__init__(size, position, *args, **kwargs)
+        super().__init__(rect, *args, **kwargs)
         
-        self.content = ['>' + ' '*(self.size.columns-1)]
+        self._empty_content = ['>' + ' '*(self.rect.width-1)]
         self.leader = leader
         self.minlen = len(leader) + 1
-        self.maxlen = self.size.columns - 3
+        self.maxlen = self.rect.width - 3
 
-    def clear(self, redraw=True, resetcursor=True) -> None:
-        self.content = ['>' + ' '*(self.size.columns-1)]
-        if redraw:
-            self.redraw()
-        if resetcursor:
-            Term.cursor_abs(self.position[1], self.position[0]+2)
+    def clear(self) -> None:
+        self._empty_content = ['>' + ' '*(self.rect.width-1)]
 
-    def redraw(self, to_start=True):
-        super().redraw()
-        if to_start:
-            Term.cursor_abs(self.position[1], self.position[0]+2)
+    def refresh(self, capture_cursor=True):
+        super().refresh()
+        if capture_cursor:
+            Term.cursor_abs(*self.rect.offset_origin((2, 0)))
 
 
-
-class AppBase(Screen):
-    def __init__(self, name, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class _TermAppBase(Canvas):
+    def __init__(self, name, alt_buff=False, *args, **kwargs):
+        super().__init__(rect=Term.rect, *args, **kwargs)
         self.name = name
-        
-        self._border_top = f'┌╴{self.name}╶' + '─'*(self.size.columns - len(name) - 4) + '┐'
-        self._border_mid = '├' + '─'*(self.size.columns - 2) + '┤'
-        self._border_bot = '└' + '─'*(self.size.columns - 2) + '┘'
-
-        self.draw_border()
-        
-    def draw_border(self):
-        Term.cursor_abs(1, 1)
-        Term.print(self._border_top)
-
-        Term.cursor_abs(self.size.lines - 2, 1)
-        Term.print(self._border_mid)
-
-        Term.cursor_abs(self.size.lines, 1)
-        Term.print(self._border_bot)
-
-        Term.cursor_abs(self.size.lines - 1, 1)
-        for r in range(2, self.size.lines - 2):
-            Term.cursor_abs(r, 1)
-            Term.print('│')
-            Term.cursor_abs(r, self.size.columns)
-            Term.print('│')
-
-        Term.cursor_abs(self.size.lines - 1, 1)
-        Term.print('│')
-        Term.cursor_abs(self.size.lines - 1, self.size.columns)
-        Term.print('│')
-
-
-class Layout(Canvas):
-    def __init__(self, size: tuple, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-class App(AppBase):
-    def __init__(self, name, *args, **kwargs):
-        super().__init__(name, *args, **kwargs)
-
-        self.content = Canvas(size=(self.size.columns-2, self.size.lines-4), position=(2, 2))
-        self.cmdline = CommandPrompt(size=(self.size.columns - 2, 1), position=(2, self.size.lines - 1))
+        self._uses_alt_buff = alt_buff
 
         # use correct input handler
         # TODO: this should probably go up in Term
@@ -263,11 +290,82 @@ class App(AppBase):
             self._inputhandler = InputHandlerNix()
         else: 
             raise NotImplementedError(f"Platform '{PLATFORM}' is not yet supported")
+        
+        self._border_top = f'┌╴{self.name}╶' + '─'*(self.rect.width - len(name) - 4) + '┐'
+        self._border_mid = '├' + '─'*(self.rect.width - 2) + '┤'
+        self._border_bot = '└' + '─'*(self.rect.width - 2) + '┘'
 
-    def run(self):
+        self.draw_border()
+        
+    def startup(self):
+        """ Sends the esc_seq to swap to the terminal alt buffer"""
+        #TODO: this doesn't seem to work properly
+        if self._uses_alt_buff:
+            Term.printcsi("?1049h")
+
+    def shutdown(self):
+        """ Sends the esc_seq to swap to the terminal main buffer, and quits"""
+        #TODO: this doesn't seem to work properly
+        if self._uses_alt_buff:
+            Term.printcsi("?1049l")
+        quit()
+    
+    def handle_input(self, char):
+        pass
+    
+    def draw_border(self):
+        Term.cursor_abs(1, 1)
+        Term.print(self._border_top)
+
+        Term.cursor_abs(1, self.rect.height - 2)
+        Term.print(self._border_mid)
+
+        Term.cursor_abs(1, self.rect.height)
+        Term.print(self._border_bot)
+
+        for r in range(2, self.rect.height - 2):
+            Term.cursor_abs(1, r)
+            Term.print('│')
+            Term.cursor_abs(self.rect.width, r)
+            Term.print('│')
+
+        Term.cursor_abs(1, self.rect.height - 1)
+        Term.print('│')
+        Term.cursor_abs(self.rect.width, self.rect.height - 1)
+        Term.print('│')
+
+
+class TermApp(_TermAppBase):
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
+
+        self.views = {}
+
+        _temp_rect = Rect((2, 2), (self.rect.width-2, self.rect.height-4))
+        _template = Canvas(_temp_rect)
+        self.views['_template'] = _template
+        self.views['default'] = _template.make_copy()
+
+        _cmdline_rect = Rect((2, self.rect.height-1), ((self.rect.width - 2, 1)))
+        self.cmdline = CommandPrompt(_cmdline_rect)
+
+        self.content = self.views['default']
+
+    def new_view(self, name: str, makedefault=False):
+        self.views[name] = self.views['_template'].make_copy()
+        if makedefault:
+            self.views['default'] = self.views[name]
+            self.change_view('default')
+        return self.views[name]
+
+    def change_view(self, name: str):
+        if name in self.views:
+            self.content = self.views[name]
+
+    def run(self, **inputfuncs):
         self.startup()
-        self.content.clear()
-        self.cmdline.clear()
+        self.content.refresh()
+        self.cmdline.refresh()
         while True:
             rawinput = self._inputhandler.getinput(echo=True)
             if rawinput == 'key_ESCAPE':
@@ -276,10 +374,23 @@ class App(AppBase):
                 Term.print(' ')
                 Term.cursor_back()
             elif rawinput is not None:
-                self.content.clear()
-                self.content.print_at(rawinput)
-                self.cmdline.clear()
+                if rawinput in inputfuncs.keys():  
+                    inputfuncs[rawinput]()  # out of all the spaghet... it'll be fine
+                else:
+                    try:
+                        inputfuncs['default'](rawinput)  # see...
+                    except KeyError:
+                        pass
+                    self.content.refresh()
+                    self.content.print_at(rawinput)
+                self.cmdline.refresh()
         
 
-terminal = App(name="App Test", alt_buff=False)
-terminal.run()
+if __name__ == "__main__":
+    from styledstring import Styledstring
+    testapp = TermApp(name="App Test", alt_buff=False)
+    startscreen = testapp.new_view(name="startscreen", makedefault=True)
+    title_text = Styledstring('TITLE TEXT', fg='red', attrs=['bold', 'underline'])
+    title = Text(title_text, alignment='center', vposition=5)
+    startscreen.add_element(title)
+    testapp.run()

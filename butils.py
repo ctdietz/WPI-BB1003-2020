@@ -37,22 +37,22 @@ def read_FASTA(filepath: str) -> dict:
 
 
 DNA_CODON_DICT = {
-    'TTT': 'F',     'CTT': 'L',     'ATT': 'I',     'GTT': 'V',
-    'TTC': 'F',     'CTC': 'L',     'ATC': 'I',     'GTC': 'V',
-    'TTA': 'L',     'CTA': 'L',     'ATA': 'I',     'GTA': 'V',
-    'TTG': 'L',     'CTG': 'L',     'ATG': 'M',     'GTG': 'V',
-    'TCT': 'S',     'CCT': 'P',     'ACT': 'T',     'GCT': 'A',
-    'TCC': 'S',     'CCC': 'P',     'ACC': 'T',     'GCC': 'A',
-    'TCA': 'S',     'CCA': 'P',     'ACA': 'T',     'GCA': 'A',
-    'TCG': 'S',     'CCG': 'P',     'ACG': 'T',     'GCG': 'A',
-    'TAT': 'Y',     'CAT': 'H',     'AAT': 'N',     'GAT': 'D',
-    'TAC': 'Y',     'CAC': 'H',     'AAC': 'N',     'GAC': 'D',
-    'TAA': '-',     'CAA': 'Q',     'AAA': 'K',     'GAA': 'E',
-    'TAG': '-',     'CAG': 'Q',     'AAG': 'K',     'GAG': 'E',
-    'TGT': 'C',     'CGT': 'R',     'AGT': 'S',     'GGT': 'G',
-    'TGC': 'C',     'CGC': 'R',     'AGC': 'S',     'GGC': 'G',
-    'TGA': '-',     'CGA': 'R',     'AGA': 'R',     'GGA': 'G',
-    'TGG': 'W',     'CGG': 'R',     'AGG': 'R',     'GGG': 'G'
+    'TTT': 'F', 'CTT': 'L', 'ATT': 'I', 'GTT': 'V',
+    'TTC': 'F', 'CTC': 'L', 'ATC': 'I', 'GTC': 'V',
+    'TTA': 'L', 'CTA': 'L', 'ATA': 'I', 'GTA': 'V',
+    'TTG': 'L', 'CTG': 'L', 'ATG': 'M', 'GTG': 'V',
+    'TCT': 'S', 'CCT': 'P', 'ACT': 'T', 'GCT': 'A',
+    'TCC': 'S', 'CCC': 'P', 'ACC': 'T', 'GCC': 'A',
+    'TCA': 'S', 'CCA': 'P', 'ACA': 'T', 'GCA': 'A',
+    'TCG': 'S', 'CCG': 'P', 'ACG': 'T', 'GCG': 'A',
+    'TAT': 'Y', 'CAT': 'H', 'AAT': 'N', 'GAT': 'D',
+    'TAC': 'Y', 'CAC': 'H', 'AAC': 'N', 'GAC': 'D',
+    'TAA': '-', 'CAA': 'Q', 'AAA': 'K', 'GAA': 'E',
+    'TAG': '-', 'CAG': 'Q', 'AAG': 'K', 'GAG': 'E',
+    'TGT': 'C', 'CGT': 'R', 'AGT': 'S', 'GGT': 'G',
+    'TGC': 'C', 'CGC': 'R', 'AGC': 'S', 'GGC': 'G',
+    'TGA': '-', 'CGA': 'R', 'AGA': 'R', 'GGA': 'G',
+    'TGG': 'W', 'CGG': 'R', 'AGG': 'R', 'GGG': 'G'
 }
 
 def codon_to_amino_acid(codon: str) -> Optional[str]:
@@ -64,6 +64,41 @@ def codon_to_amino_acid(codon: str) -> Optional[str]:
         return None
     else:
         return aa
+
+
+idx = {'U': 0, 'C': 1, 'A': 2, 'G': 3}
+
+RNA_CODON_TUPLE = (
+# NOTE: a period character represents a stop codon.
+# ----------- U -----------     
+    # U    C    A    G          
+   (('F', 'F', 'L', 'L'),  # U    
+    ('S', 'S', 'S', 'S'),  # C  
+    ('Y', 'Y', '.', '.'),  # A  
+    ('C', 'C', '.', 'W')), # G  
+# ----------- C -----------     
+    # U    C    A    G          
+   (('L', 'L', 'L', 'L'),  # U   
+    ('P', 'P', 'P', 'P'),  # C             
+    ('H', 'H', 'Q', 'Q'),  # A             
+    ('R', 'R', 'R', 'R')), # G             
+# ----------- A -----------             
+    # U    C    A    G                       
+   (('I', 'I', 'I', 'M'),  # U             
+    ('T', 'T', 'T', 'T'),  # C             
+    ('N', 'N', 'K', 'K'),  # A             
+    ('S', 'S', 'R', 'R')), # G             
+# ----------- G -----------             
+    # U    C    A    G                       
+   (('V', 'V', 'V', 'V'),  # U             
+    ('A', 'A', 'A', 'A'),  # C             
+    ('D', 'D', 'E', 'E'),  # A             
+    ('G', 'G', 'G', 'G'))  # G             
+)
+
+def rna_codon_to_amino_acid(codon: str) -> str:
+    aa_char = RNA_CODON_TUPLE[idx[codon[0]]][idx[codon[1]]][idx[codon[2]]]
+    return aa_char
 
 def dna_to_protein(dna: str) -> Tuple[str, str]:
     """

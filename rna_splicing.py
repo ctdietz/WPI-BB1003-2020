@@ -11,8 +11,8 @@ def splice_dna(dna: str, *introns: str) -> str:
 
 def color_introns(dna: str, *introns: str) -> str:
     for intron in introns:
-        intron = Styledstring(intron, fg='red')
-        dna = dna.replace(intron, intron.styled)
+        intron_styled = Styledstring(intron, fg='red')
+        dna = dna.replace(intron, intron_styled)
     return dna
 
 
